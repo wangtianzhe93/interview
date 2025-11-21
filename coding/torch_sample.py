@@ -4,20 +4,21 @@ pytorch basic
 import torch
 import numpy as np
 
+# tensor
 def pytorch_tensor():
     # pytorch tensor examples
     ## create an un-initialized 5x3 tensor
     x = torch.empty(5, 3)
-    print(x) # result: tensor with uninitialized values
+    # x: tensor with uninitialized values
 
     ## create a random tensor
     x = torch.rand(5, 3)
-    print(x) # result: tensor with random values
+    ### x: tensor with random values
 
     ## create a tensor filled with zeros and of dtype long
     x = torch.zeros(5, 3, dtype=torch.long)
-    print(x) # result: tensor filled with zeros
-    print(x.shape) # result: torch.Size([5, 3])
+    ### x: tensor filled with zeros
+    ### x.shape: torch.Size([5, 3])
 
     ## create a tensor directly from data
     x = torch.tensor([5.5, 3])
@@ -82,7 +83,40 @@ def pytorch_numpy():
     print(a) # result: numpy array filled with twos
     print(b) # result: tensor filled with twos (shared memory)
 
+# auto differential
+def pytorch_tensor_auto_differential():
+    ## create new tensor...
+    x = torch.ones(2, 2, requires_grad=True)
+    print(x)
+    ### x: tensor([[1., 1.], [1., 1.]], requires_grad=True)
+
+    ## play with tensor
+    y = x + 2
+    ### y: x add 2 each element
+
+    ## play with y
+    z = y * y * 3
+    out = z.mean()
+    ### z: tensor([[27., 27.], [27., 27.]], grad_fn=<MulBackward0>)
+    ### out: mean from all elements in tensor, 27
+
+def pytorch_gradient():
+    ## fake input
+    x = torch.ones(2, 2, requires_grad=True)
+    y = x + 2
+    z = y * y * 3
+    out = z.mean()
+
+    ## backward to tensor
+    out.backward()
+
+    ## print gradient, d(out)/dx
+    print(x.grad)
+    ### x.grad: 0.25 * Σ3(x + 2) ^ 2
+
 
 if __name__ == "__main__":
     # pytorch_tensor()
-    pytorch_numpy()
+    # pytorch_numpy()
+    # pytorch_tensor_auto_differential()
+    pytorch_gradient()
