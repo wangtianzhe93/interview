@@ -391,10 +391,10 @@ zs = copy.deepcopy(xs)
     1.5
     ```
 
-- **解释Python中的垃圾回收机制**
+- **Python garbage collect**
 
-    - GC要做的有 2 件事, 一是找到内存中无用的垃圾对象资源, 二是清除找到的这些垃圾对象, 释放内存给其他对象使用.
-    - Python GC主要使用引用计数(reference counting)来跟踪和回收垃圾.在引用计数的基础上, 通过“标记-清除”(mark and sweep)解决容器对象可能产生的循环引用问题, 通过“分代回收”(generation collection)以空间换时间的方法提高垃圾回收效率.
+    - Garbage Collect要做的有 2 件事, 一是找到内存中无用的垃圾对象资源, 二是清除找到的这些垃圾对象, 释放内存给其他对象使用.
+    - Python Garbage Collect主要使用引用计数(reference counting)来跟踪和回收垃圾.在引用计数的基础上, 通过“标记-清除”(mark and sweep)解决容器对象可能产生的循环引用问题, 通过"分代回收"(generation collection)以空间换时间的方法提高垃圾回收效率.
 
 - **Python中__new__和__init__的区别?**
 

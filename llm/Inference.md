@@ -52,6 +52,12 @@
 
     ![Untitled](Inference/infer_sequence1.png)
 
+- **自回归采样**
+    - 大模型的自回归采样过程如下:
+        - 1 模型使用prompt(prefill结果)作为输入, 将输出结果处理和归一化成为概率分布后, 采样生成下一个token.
+        - 2 将生成的token和prefill结果拼接成为新的输入, 重复执行步骤1, 直到生成eos或者达到最大token数目.
+        - 在第1步中, 将模型输出的logits转换成概率, 有几种常用的采样方法, 包括argmax, top-k和top-n
+
 ## vLLM
 
 - **vLLM definition**
@@ -163,7 +169,7 @@
     ![Untitled](Inference/infer3.png)
 
 
-- **eager**
+- **eager和graph模式**
     - graph模式
         - 首先介绍一下vLLM默认使用的CUDA Graph(即graph模式)
         - CUDA Graph 是 NVIDIA 提供的一种机制, 可以将一系列CUDA操作"录制"成一个静态图, 然后反复高效重放. 在LLM推理中, decode的步骤, 即每次生成一个token的计算模式高度重复, 特别是在相同的batch size, 相同的sequence length增量情况下, 非常适合用CUDA Graph加速.
@@ -288,5 +294,70 @@
     - 当prompt非常长(128k)时, 由于产生的KV cache太大, 一次性Prefill可能超出GPU显存, 从而导致显存碎片或OOM. 因此, 可以将prompt分成多个chunk(块), 逐块处理.
     - 每块做一次partial prefill, 累积 KV Cache, 当最后一块处理完后, 再开始 decode.
 
-- **模型量化**
+- **MTP**
+    - MTP(Multi-Token Prediction)是一种旨在提升大模型推理吞吐(throughput)的优化技术, 其核心思想是: 在单次前向传播中预测多个未来token, 而非传统自回归方式的每次一个token.
+    - reference
+        https://www.youtube.com/watch?v=oXRSorx-Llg
+        https://zhuanlan.zhihu.com/p/29082207943
+        https://github.com/vllm-project/vllm/pull/12915
+        https://github.com/sgl-project/sglang/pull/3582
+        https://github.com/vllm-project/vllm/pull/12755
+        https://github.com/vllm-project/vllm/pull/13269
+        https://github.com/vllm-project/vllm/pull/13578
+        https://github.com/vllm-project/vllm/pull/13626
+        Accelerating Large Language Model Decoding with Speculative Sampling: https://arxiv.org/pdf/2302.01318
+        deepseekv3 paper: https://github.com/deepseek-ai/DeepSeek-V3/blob/main/DeepSeek_V3.pdf
+        https://zhuanlan.zhihu.com/p/15037286337
+        https://zhuanlan.zhihu.com/p/651359908
+        https://zhuanlan.zhihu.com/p/658298728
+
+    - MTP的原理
+        - 问题: 传统的自回归模型GPU利用率低(尤其在是小batch_size或者短prompt的情况下), 内存带宽未饱和, 延迟主导场景下的吞吐性能差.
+        - 目标: 在保证生成质量的前提下, 通过一次生成多个token, 减少前向计算次数, 提升吞吐.
+        ![Untitled](Inference/mtp1.png)
+
+        - 传统的自回归解码(Autoregressive Decoding)每次前向传播生成1个token, 存在计算效率瓶颈.
+            - 在传统的自回归解码中, 初始prompt的token是"how", "how"先经过embedding计算变成$e_{how}$, 然后经过Decoder Layer的计算, 输出特征向量$f_{how}$ (最后一层hidden states), 经过LM Head转换成一个概率分布向量$p_{how}$, 通过采样得到生成结果token "can".
+            - 然后LLM会把"can"作为新的输入, 进行下一步的计算, 直到LLM给出推理结束的token "\<EOS\>".
+            - 自回归解码是逐token迭代进行的, 生成一个token, 将token作为输入生成新的token, 直到遇到结束条件"\<EOS\>"或者到达了最大的生成长度.
+        - 在投机解码(Speculative Decoding)里
+            - 在投机解码中, 初始的prompt的token还是"how", embedding不变, 在Decoder Layer时会通过其他方式(比如一个小模型, draft model)先推测两个草稿token(draft token) "can" "we", 同时输入到目标模型. 普通的Decoder实现仅能解码得到一个token, 这里改造成了能够同时解码输出3个token的hidden states. 这样就可以同时得到$p_{how}$, $p_{can}$和$p_{we}$, 然后可以根据draft model输出的$q_{how}$和$p_{can}$进行比较, 验证是否接受draft model的draft token "can"和"we".
+            - 在上面的例子里, 目标模型的验证结果是接受"can", 但是拒绝"we", 所以就使用$p_{can}$进行采样, 得到了生成结果token "I". 这就意味着, 投机解码通过一次推理, 得到了两个token "can"和"I", 实现了一倍逻辑加速.
+        - 投机采样(speculative decoding)是一种可以从根本上解码计算访存比的方法, 保证和使用原始模型的采样分布完全相同. 它使用两个模型: 一个是原始目标模型, 另一个是比原始模型小得多的近似模型. 近似模型用于进行自回归串行采样, 而大型模型则用于评估采样结果. 解码过程中, 某些token的解码相对容易, 某些token的解码则很困难. 因此, 简单的token生成可以交给小型模型处理, 而困难的token则交给大型模型处理. 这里的小型模型可以采用与原始模型相同的结构, 但参数更少, 或者干脆使用n-gram模型. 小型模型不仅计算量较小, 更重要的是减少了内存访问的需求.
+        - 下图中每一行代表一次迭代. 绿色的标记是由近似模型提出的token建议, 而目标模型判断是否接受了这些token生成的建议. 红色和蓝色的标记分别表示被拒绝和其修正.
+        - 在第一行中, 近似模型生成了5个token, 目标模型使用这5个token和前缀拼接后的句子”[START] japan’s bechmark bond”作为输入, 通过一次推理执行来验证小模型的生成效果. 这里, 最后一个token "bond"被目标模型拒绝, 重新采样生成"n". 这样中间的四个token, "japan" "'s" "benchmark"都是小模型生成的. 以此类推, 由于用大模型对输入序列并行地执行, 大模型只forward了9次, 就生成了37个token. 尽管总的大模型的计算量不变, 但是大模型推理一个1个token和5个token延迟类似, 这还是比大模型一个一个蹦词的速度要快很多.
+        ![Untitled](Inference/mtp2.png)
+        - 顶部一行显示了$\gamma=7$的投机采样, 中间一行显示了$\gamma=3$的投机解码，是小模型一次生成token数目(num_speculative_tokens). 可以观察到使用投机采样可以解码时间大幅缩减.
+        ![Untitled](Inference/mtp3.png)
+
+
+    - MTP的技术路线
+        - 确定性MTP(N-gram/Cache-based MTP)
+            - 利用已经生成的上下文匹配历史N-gram, (无需模型计算)直接猜测后续的多个token, 在错误时进行回退.
+        - 模型增强MTP(Multi-token head/Parallel Prediction)
+            - 修改模型结构, 或者利用其内在能力, 让最后一层或者额外的head同时输出多个future token.
+        - 严格意义上的MTP并非指的是单一的标准或技术, 而是对于单次推理输出多个token这类技术的统称, 目前工业界更常用的是Speculative Decoding.
+        - 在MTP中, 自回归依赖被打破, decoder真实生成时是严格依赖前序token的, 因此需要保证token并行预测时的正确性, 做法是只在高置信区域(如重复模式, 固定短语)的位置启用, 或者通过veriftication step(如target model校验)排除错误的预测.
+        - 在训练和微调时, 如果新增head(Medusa), 需要额外训练auxiliary heads; 如果只利用base model(Lookhead), 需要prompt engineering或者dynamic caching.
+
+    - vLLM中的MTP
+        - vLLM原生支持Speculative Decoding(即MTP类技术), 主要是通过两个机制实现:
+            - Draft model + Target Model
+                - 使用一个更小更浅(层数更少)的draft model做speculative proposals.
+                - target model(即原模型)负责verification.
+                - MTP的模型增强路线, 但是draft model是独立的模型, 并非head扩展.
+            - 相关api:
+                ```python
+                python -m vllm.entrypoints.openai.api_server \
+                    --model meta-llama/Llama-3-8B-Instruct \
+                    --speculative-model meta-llama/Llama-3-8B-Instruct \  # 或更小模型，如 TinyLlama
+                    --num-speculative-tokens 5
+                ```
+        - 底层机制: chunked prefill + block wise KV cache
+            - vLLM的Paged Attention和连续块管理(Block Manager)天然支持speculative tokens的KV cache预分配与回滚.
+            - verification失败的时候, 可以快速discard speculative tokens 对应的 cache blocks.
+
+        - 
+        
     
+            

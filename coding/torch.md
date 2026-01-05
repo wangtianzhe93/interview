@@ -4,7 +4,8 @@
 
 - **stride**
     - Reference: [https://martinlwx.github.io/zh-cn/how-to-reprensent-a-tensor-or-ndarray/](https://martinlwx.github.io/zh-cn/how-to-reprensent-a-tensor-or-ndarray/)
-    - 按行存储与按列存储
+    
+    - Torch tensor storage
         - 在torch里, 一个二维数组中一般在内存里占据连续的位置, 但是按行和按列存储是不同的. 比如现在有一个`shape=[2, 3]`的二维数组:
         ```python
             [[0.2949, 0.9608, 0.0965],
@@ -52,6 +53,7 @@
             ]
         ```
         - 对于一个大小为`(A.shape[0], A.shape[1])`的二维数组, 它的offset是0, `strides = [A.shape[1], 1]`(row-major). 也就是说, 每次在第一个维度上要跳跃"一个单位", 需要跳过底层的`A.shape[1]`个元素, `A.shape[1]`即为行的长度. 即下图所示.
+
         ![Untitled](torch/torch1.png)
 
         - 那么如何得到`N`维张量的`strides`数组? 假设要求解的是`strides[k]`即第`k`个维度的`stride`, 我们知道它的语义是"在第`k`维上移动一个单位需要在内存上跳过多少个元素", 如果这个张量的底层存储在内存上是连续存储(紧凑格式), 那就是`k+1, k+2, ... , N-1`维度的大小的乘积, 如果 `k = N - 1`, 那么`strides[N - 1] = 1`.
@@ -97,5 +99,5 @@
                 #         16, 17, 18, 19,
                 #         20, 21, 22, 23])
             ```
-            - 按照我们前面说的从张量的维度推导stride的方法, 我们不难知道这个tensor的stride应该是`(2 * 3 * 4, 3 * 4, 4, 1)`也就是`(24, 12, 4, 1)`. 在 Pytorch 里面，我们可以通过调用 tensor 的 stride() 方法获得 stride，可以看到，确实跟我们手动计算出来的一样
+            - 按照我们前面说的从张量的维度推导stride的方法, 我们不难知道这个tensor的stride应该是`(2 * 3 * 4, 3 * 4, 4, 1)`也就是`(24, 12, 4, 1)`. 在 Pytorch 里面，我们可以通过调用 tensor 的 stride() 方法获得 stride，可以看到，确实跟我们手动计算出来的一样.
 
