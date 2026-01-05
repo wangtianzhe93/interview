@@ -314,7 +314,6 @@
     - MTP的原理
         - 问题: 传统的自回归模型GPU利用率低(尤其在是小batch_size或者短prompt的情况下), 内存带宽未饱和, 延迟主导场景下的吞吐性能差.
         - 目标: 在保证生成质量的前提下, 通过一次生成多个token, 减少前向计算次数, 提升吞吐.
-        ![Untitled](Inference/mtp1.png)
 
         - 传统的自回归解码(Autoregressive Decoding)每次前向传播生成1个token, 存在计算效率瓶颈.
             - 在传统的自回归解码中, 初始prompt的token是"how", "how"先经过embedding计算变成$e_{how}$, 然后经过Decoder Layer的计算, 输出特征向量$f_{how}$ (最后一层hidden states), 经过LM Head转换成一个概率分布向量$p_{how}$, 通过采样得到生成结果token "can".
